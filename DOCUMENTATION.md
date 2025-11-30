@@ -86,30 +86,3 @@ The **S4 Robot Management System** is a high-performance, web-based interface de
 1.  **Digital Twin:** Upgrade the 2D map to a Three.js 3D environment.
 2.  **Voice Command:** Integrate Gemini Live API for voice-based control ("Robot, go to sector 7").
 3.  **Predictive Maintenance:** Use historical Firebase data to predict motor failure before it happens.
-
----
-
-## 6. Architecture Diagram
-
-```mermaid
-graph TD
-    User[Human Operator] -->|Interacts| UI[Web Dashboard (React + Tailwind)]
-    
-    subgraph "Client Side (Edge)"
-        UI -->|Commands| Logic[Robot Logic Loop (50ms)]
-        Logic -->|Updates| State[Local State (RAM)]
-        State -->|Renders| Canvas[Visual SLAM Map]
-        State -->|Simulates| Physics[Collision & Battery Physics]
-    end
-
-    subgraph "Cloud Services (Firebase)"
-        Auth[Firebase Auth] -->|Verifies| User
-        State -->|Syncs Telemetry (100ms)| Firestore[Firestore NoSQL DB]
-        Firestore -->|History Logs| UI
-    end
-    
-    subgraph "AI Services (Google)"
-        UI -->|Sends Logs + Context| Gemini[Gemini 2.5 Flash Model]
-        Gemini -->|Returns Diagnosis| UI
-    end
-```
