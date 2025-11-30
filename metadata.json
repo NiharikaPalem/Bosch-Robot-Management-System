@@ -1,0 +1,5 @@
+{
+  "name": "S4 Robot Management System",
+  "description": "A high-performance React dashboard for remote robot tele-operation, visualization, and diagnostics using Gemini AI and Firebase.",
+  "requestFramePermissions": []
+}

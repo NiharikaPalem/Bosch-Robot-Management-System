@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S4 Remote Robot Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Firebase SDK Imports --><script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase functions globally for use in the main script block
+        window.firebase = {
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, 
+            getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, setLogLevel, serverTimestamp, limit, orderBy,
+            GoogleAuthProvider, signInWithPopup, signOut
+        };
+        // Signal that firebase module is loaded
+        window.isFirebaseModuleLoaded = true;
+    </script>
+
+    <style>
+        /* Custom Scrollbar for Logs */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .custom-scroll::-webkit-scrollbar { width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #1e293b; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        /* Chart Container Styling - Mandatory Constraint */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 250px;
+            max-height: 300px;
+        }
+
+        /* Grid Background for Map */
+        .bg-grid-pattern {
+            background-image: linear-gradient(to right, #1e293b 1px, transparent 1px),
+                              linear-gradient(to bottom, #1e293b 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        
+        /* Table Cell Styling */
+        .telemetry-table tr > td:first-child {
+            @apply text-slate-400 font-normal;
+        }
+        .telemetry-table tr > td:last-child {
+            @apply text-white font-mono text-sm;
+        }
+        .persistence-table th {
+            @apply px-4 py-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-800/50;
+        }
+        .persistence-table td {
+            @apply px-4 py-2 text-sm whitespace-nowrap;
+        }
+        
+        /* Disabled Button and Input Styling */
+        .control-btn:disabled, .control-input:disabled {
+            @apply bg-slate-700/50 border-slate-600 shadow-none text-slate-400 cursor-not-allowed translate-y-0;
+        }
+        
+        /* Custom Range Slider Styling (for Tailwind) */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #fcd34d; /* yellow-300 */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #1f2937; /* slate-800 */
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1"
+  }
+}
+</script>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col">
+
+    <!-- Compatibility Root for React (Hidden) -->
+    <div id="root" style="display: none;"></div>
+
+    <!-- Navbar --><nav class="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <div class="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
+                        <span class="text-xl">🤖📦</span>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg tracking-wide text-white">Bosch <span class="text-blue-400">Warehouse Robot System</span></h1>
+                        <p class="text-[10px] text-slate-400 uppercase tracking-wider">Cloud Link Interface</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="hidden md:flex flex-col items-end mr-2">
+                        <span class="text-xs text-slate-400">User</span>
+                        <span id="displayUserId" class="text-xs font-mono text-indigo-400">Guest</span>
+                    </div>
+                    <button onclick="toggleAuth()" id="authBtn" class="bg-white hover:bg-slate-100 text-slate-900 px-4 py-2 rounded-full text-sm font-bold transition-colors border border-slate-200 flex items-center gap-2">
+                        <span class="text-lg">G</span> Sign In with Google
+                    </button>
+                    <div class="hidden md:flex flex-col items-end mr-2 border-l border-slate-700 pl-4 ml-2">
+                        <span class="text-xs text-slate-400">Uplink Status</span>
+                        <span id="connStatus" class="text-xs font-bold text-emerald-400 animate-pulse">● LIVE CONNECTION</span>
+                    </div>
+                    <button onclick="toggleConnection()" id="connBtn" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-full text-xs font-medium transition-colors border border-slate-700">
+                        Disconnect
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Dashboard Content --><main class="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full space-y-6">
+
+        <!-- Intro / Context Section --><section class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
+            <h2 class="text-xl font-semibold text-white mb-2">System Context & Interface Overview</h2>
+            <p class="text-slate-400 text-sm leading-relaxed">
+                This dashboard provides real-time kinematic control and data analysis for the <strong class="text-blue-400">Bosch Warehouse Humanoid Robot</strong>. It now supports **Pick and Place** operations. <br>
+                <span id="authStatusMsg" class="text-yellow-400 text-xs mt-1 block">⚠️ You are currently in Guest Mode. Data is stored locally. Sign in to enable Cloud Persistence.</span>
+            </p>
+        </section>
+
+        <!-- KPI Row --><div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <!-- Battery --><div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center shadow-lg">
+                <div class="text-3xl mb-1">🔋</div>
+                <div class="text-2xl font-bold text-emerald-400" id="batteryVal">87%</div>
+                <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Battery Level</div>
+            </div>
+            <!-- Signal --><div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center shadow-lg">
+                <div class="text-3xl mb-1">📡</div>
+                <div class="text-2xl font-bold text-blue-400" id="signalVal">-42 dBm</div>
+                <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Signal Strength</div>
+            </div>
+            <!-- Speed --><div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center shadow-lg">
+                <div class="text-3xl mb-1">⚡</div>
+                <div class="text-2xl font-bold text-yellow-400" id="speedVal">0.0 m/s</div>
+                <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Current Speed</div>
+            </div>
+             <!-- Direction --><div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center shadow-lg">
+                <div class="text-3xl mb-1">🧭</div>
+                <div class="text-2xl font-bold text-purple-400" id="directionVal">STOP</div>
+                <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Direction</div>
+            </div>
+            <!-- SYSTEM STATE --><div id="systemStateKPI" class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center shadow-lg transition-colors duration-300">
+                <div class="text-3xl mb-1" id="stateIcon">🟢</div>
+                <div class="text-2xl font-bold text-emerald-400" id="stateVal">OPERATIONAL</div>
+                <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">System State</div>
+            </div>
+        </div>
+
+        <!-- Central Dashboard Grid --><div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Col 1: Visual SLAM Map (Kinematics) --><div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-xl">
+                <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+                    <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                        <span>🗺️</span> Visual SLAM & Path Logging (Obstacle Map Active)
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <!-- Path Tracking Stop/Start -->
+                        <button onclick="togglePathTracking()" id="pathTrackingBtn" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-white text-xs border border-red-600 font-medium transition-colors">
+                            Stop Tracking
+                        </button>
+                        <span id="pathStatus" class="px-2 py-1 bg-blue-900/30 text-blue-400 text-xs rounded border border-blue-800 font-mono">LIVE TRACKING</span>
+                    </div>
+                </div>
+                <div class="relative flex-grow bg-grid-pattern h-[400px]">
+                    <canvas id="mapCanvas" class="w-full h-full block"></canvas>
+                    <div class="absolute bottom-4 left-4 bg-slate-900/90 p-2 rounded border border-slate-700 text-xs font-mono text-red-400">
+                        🔴 Obstacle Avoidance is Active
+                    </div>
+                    <div class="absolute bottom-4 right-4 bg-slate-900/90 p-2 rounded border border-slate-700 text-xs font-mono text-slate-400">
+                        X: <span id="posX" class="text-white">50.0</span> | Y: <span id="posY" class="text-white">50.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Col 2: Tele-operation & Controls --><div class="flex flex-col gap-6">
+                
+                <!-- Controller --><div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-xl">
+                    <div class="mb-4 flex justify-between items-center">
+                        <h3 class="font-bold text-slate-200">🕹️ Tele-Operation</h3>
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    </div>
+                    
+                    <div class="bg-slate-900 rounded-lg p-6 border border-slate-800 aspect-square flex flex-col items-center justify-center relative">
+                        <!-- Up --><button onclick="moveRobot('UP')" class="control-btn absolute top-4 w-14 h-14 bg-slate-700 hover:bg-blue-600 rounded-lg shadow-[0_4px_0_0_rgba(0,0,0,0.5)] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center text-2xl border border-slate-600">⬆️</button>
+                        
+                        <!-- Left --><button onclick="moveRobot('LEFT')" class="control-btn absolute left-4 w-14 h-14 bg-slate-700 hover:bg-blue-600 rounded-lg shadow-[0_4px_0_0_rgba(0,0,0,0.5)] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center text-2xl border border-slate-600">⬅️</button>
+                        
+                        <!-- Center Status --><div class="w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center shadow-inner">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        </div>
+
+                        <!-- Right --><button onclick="moveRobot('RIGHT')" class="control-btn absolute right-4 w-14 h-14 bg-slate-700 hover:bg-blue-600 rounded-lg shadow-[0_4px_0_0_rgba(0,0,0,0.5)] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center text-2xl border border-slate-600">➡️</button>
+
+                        <!-- Down --><button onclick="moveRobot('DOWN')" class="control-btn absolute bottom-4 w-14 h-14 bg-slate-700 hover:bg-blue-600 rounded-lg shadow-[0_4px_0_0_rgba(0,0,0,0.5)] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center text-2xl border border-slate-600">⬇️</button>
+                    </div>
+                    <p class="text-center text-xs text-slate-500 mt-3">Supports Keyboard Arrow Keys</p>
+                    
+                    <!-- NEW: Speed Control --><div class="mt-4 pt-4 border-t border-slate-700">
+                        <label for="speedSlider" class="text-sm font-semibold text-slate-300 flex justify-between items-center mb-2">
+                            Movement Speed: <span id="displayTargetSpeed" class="font-mono text-lg text-yellow-400">1.5 m/s</span>
+                        </label>
+                        <input 
+                            type="range" 
+                            id="speedSlider" 
+                            min="0.5" 
+                            max="3.0" 
+                            step="0.1" 
+                            value="1.5" 
+                            class="control-input w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer range-lg"
+                            oninput="updateTargetSpeed(this.value)"
+                        >
+                        <p class="text-xs text-slate-500 mt-1">Min: 0.5 m/s | Max: 3.0 m/s</p>
+                    </div>
+
+                    <!-- START/STOP BUTTONS --><div class="flex gap-2 mt-4">
+                        <button 
+                            onclick="startRobot()" 
+                            id="startRobotBtn"
+                            class="control-btn w-1/2 bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-emerald-900 shadow-[0_4px_0_0_rgba(4,120,87,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            ▶️ START MOVEMENT
+                        </button>
+                        <button 
+                            onclick="stopRobot()" 
+                            id="stopRobotBtn"
+                            class="control-btn w-1/2 bg-red-700 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-red-900 shadow-[0_4px_0_0_rgba(185,28,28,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            🛑 STOP MOVEMENT
+                        </button>
+                    </div>
+
+                    <!-- FALL/STANDUP BUTTONS --><div class="flex gap-2 mt-2">
+                        <button 
+                            onclick="fallRobot()" 
+                            id="fallRobotBtn"
+                            class="control-btn w-1/2 bg-yellow-700 hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-yellow-900 shadow-[0_4px_0_0_rgba(180,83,9,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            ⬇️ Simulate Fall
+                        </button>
+                        <button 
+                            onclick="standUpRobot()" 
+                            id="standUpBtn" 
+                            disabled 
+                            class="control-btn w-1/2 bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-blue-900 shadow-[0_4px_0_0_rgba(37,99,235,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            🧍 Stand Up
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Cargo Management Control --><div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-xl">
+                    <h3 class="font-bold text-slate-200 mb-4 flex items-center gap-2">
+                        📦 Cargo Management
+                    </h3>
+                    
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 mb-4">
+                        <p class="text-sm font-semibold text-slate-300 mb-1">Current Cargo Status</p>
+                        <p id="cargoStatus" class="text-xs text-slate-400 font-mono flex items-center gap-2">
+                            No Box Attached.
+                        </p>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button 
+                            onclick="pickUpBox()" 
+                            id="pickUpBtn"
+                            class="control-btn w-1/2 bg-purple-700 hover:bg-purple-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-purple-900 shadow-[0_4px_0_0_rgba(126,34,206,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            ⬆️ Pick Up Box
+                        </button>
+                        <button 
+                            onclick="placeBox()" 
+                            id="placeBoxBtn" 
+                            disabled 
+                            class="control-btn w-1/2 bg-cyan-700 hover:bg-cyan-600 text-white py-2 rounded-lg text-sm font-bold transition-all border border-cyan-900 shadow-[0_4px_0_0_rgba(8,145,178,0.8)] active:shadow-none active:translate-y-1"
+                        >
+                            ⬇️ Place Box
+                        </button>
+                    </div>
+
+                    <button 
+                        onclick="resetMapAndPath()" 
+                        class="w-full mt-4 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg text-sm font-medium transition-colors border border-slate-600"
+                    >
+                        Reset Map, Path & Cargo
+                    </button>
+                </div>
+
+                <!-- Hand Kinematics Control --><div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-xl">
+                    <h3 class="font-bold text-slate-200 mb-4 flex items-center gap-2">
+                        🦾 Hand Kinematics
+                    </h3>
+                    <div class="space-y-4">
+                        <!-- Left Hand --><div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                            <p class="text-sm font-semibold text-slate-300 mb-1">Left Arm Status</p>
+                            <p class="text-xs text-slate-400 font-mono">
+                                Axis: <span id="leftHandAxis" class="text-blue-400">Pitch</span> | 
+                                Angle: <span id="leftHandAngle" class="text-emerald-400">180°</span>
+                            </p>
+                            <div class="mt-2 flex gap-2">
+                                <button onclick="moveHand('LEFT', 'Pitch', -15)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Pitch -15°</button>
+                                <button onclick="moveHand('LEFT', 'Pitch', 15)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Pitch +15°</button>
+                                <button onclick="setHand('LEFT', 180)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Reset</button>
+                            </div>
+                        </div>
+
+                        <!-- Right Hand --><div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                            <p class="text-sm font-semibold text-slate-300 mb-1">Right Arm Status</p>
+                            <p class="text-xs text-slate-400 font-mono">
+                                Axis: <span id="rightHandAxis" class="text-blue-400">Pitch</span> | 
+                                Angle: <span id="rightHandAngle" class="text-emerald-400">0°</span>
+                            </p>
+                            <div class="mt-2 flex gap-2">
+                                <button onclick="moveHand('RIGHT', 'Pitch', -15)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Pitch -15°</button>
+                                <button onclick="moveHand('RIGHT', 'Pitch', 15)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Pitch +15°</button>
+                                <button onclick="setHand('RIGHT', 0)" class="control-btn w-1/3 text-xs bg-slate-700 hover:bg-slate-600 py-1 rounded">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row: Analytics & Logs --><div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Col 1: Kinematics Analysis Chart (Renamed) --><div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <h3 class="font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                    <span>📈</span> Kinematics Analysis: Speed Profile
+                </h3>
+                <div class="chart-container">
+                    <canvas id="velocityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Col 2: 100ms Telemetry Mirror --><div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                        <span>📡</span> Telemetry Mirror (100ms)
+                    </h3>
+                    <span id="updateIndicator" class="text-xs px-2 py-1 rounded-full bg-emerald-900/50 text-emerald-400 animate-pulse">LIVE DATA STREAM</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm telemetry-table">
+                        <tbody id="telemetryTableBody" class="divide-y divide-slate-800">
+                            <!-- Data rows injected by JS --></tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-2">Reflects current data packet (Local or Cloud).</p>
+            </div>
+            
+            <!-- Col 3: NEW 5-Second Persistence Log (MongoDB View) --><div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                        <span>💾</span> Persistence Log (5s)
+                    </h3>
+                    <div class="flex items-center">
+                        <span id="persistenceIndicator" class="text-xs px-2 py-1 rounded-full bg-orange-900/50 text-orange-400 animate-pulse">LOCAL RAM</span>
+                        <!-- NEW STOP/START BUTTON --><button onclick="togglePersistenceLog()" id="persistenceToggleBtn" class="px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded-full font-medium transition-colors ml-2">
+                            Stop Log
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm persistence-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Pos (X/Y)</th>
+                                <th>Speed (m/s)</th>
+                                <th>Battery (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="persistenceTableBody" class="divide-y divide-slate-800">
+                            <!-- Data rows injected by JS --></tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-2">Shows aggregated data points.</p>
+            </div>
+
+        </div>
+        
+        <!-- System Logs & Diagnosis --><div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-black border border-slate-800 rounded-xl p-4 shadow-xl flex flex-col">
+                <div class="flex justify-between items-center mb-2 border-b border-slate-800 pb-2">
+                    <h3 class="font-mono text-sm text-green-400 font-bold">>_ System Logs</h3>
+                    <button onclick="analyzeLogs()" id="diagnosisBtn" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-full font-medium transition-colors disabled:bg-slate-700 disabled:text-slate-400">
+                        ✨ AI Diagnosis Expert
+                    </button>
+                </div>
+                
+                <div id="logConsole" class="flex-grow overflow-y-auto font-mono text-xs space-y-1 custom-scroll p-1 h-24 max-h-24 min-h-24">
+                    <!-- Logs injected here --><div class="text-slate-500"><span class="text-slate-600">[10:00:01]</span> System init sequence started...</div>
+                    <div class="text-slate-500"><span class="text-slate-600">[10:00:02]</span> Connected to Cloud Node S4-Alpha.</div>
+                </div>
+            </div>
+
+            <!-- AI Diagnosis Output --><div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-xl">
+                <h4 class="text-xs font-semibold text-indigo-400 mb-1 flex items-center gap-1">
+                    AI Recommendation:
+                    <span id="diagnosisLoading" class="hidden w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span>
+                </h4>
+                <div id="logDiagnosisContainer" class="bg-slate-900 p-2 rounded text-xs text-slate-300 italic min-h-[40px] flex items-center">
+                    Run the AI Diagnosis Expert for a summary and recommendation based on the current logs.
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer --><footer class="border-t border-slate-800 mt-auto bg-slate-950 py-6">
+        <div class="max-w-7xl mx-auto px-4 text-center text-slate-600 text-sm">
+            FIT.Fest '25 Hackathon • Bosch Remote Management Module • Prototype Build
+        </div>
+    </footer>
+
+    <!-- Application Logic --><script>
+        // --- MANDATORY FIREBASE GLOBALS ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        // Manual Configuration provided by user
+        const manualFirebaseConfig = {
+          apiKey: "AIzaSyCY0ziSNRzmu2lz-qx10dNW0C7frVcACMM",
+          authDomain: "bosch-robot-management-s-df64c.firebaseapp.com", // Corrected to standard format
+          projectId: "bosch-robot-management-s-df64c",
+          storageBucket: "bosch-robot-management-s-df64c.firebasestorage.app",
+          messagingSenderId: "773058221262",
+          appId: "1:773058221262:web:d820a9fe4fdcb36ebaac9f",
+          measurementId: "G-BG89B734TN"
+        };
+        
+        // Robust config retrieval handling both string and object
+        let firebaseConfig = manualFirebaseConfig;
+        
+        if (typeof __firebase_config !== 'undefined') {
+            if (typeof __firebase_config === 'string') {
+                try {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                } catch(e) { console.error("Config parse error", e); }
+            } else {
+                firebaseConfig = __firebase_config;
+            }
+        }
+        
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Firebase Instances
+        let db = null;
+        let auth = null;
+        let userId = 'anonymous'; 
+
+        // --- Chart Configuration Constants ---
+        const VELOCITY_HISTORY_LENGTH = 400; // 400 points * 50ms = 20 seconds of history
+        
+        // --- Gemini API Configuration ---
+        const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
+        const API_KEY = ""; 
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`;
+        const MAX_RETRIES = 5;
+        const TELEMETRY_INTERVAL_MS = 100; 
+        const PERSISTENCE_INTERVAL_MS = 5000; 
+        const ROBOT_LOGIC_INTERVAL_MS = 50; 
+        const ACCELERATION_RATE = 0.05; // m/s per loop interval
+        const ROBOT_RADIUS_PERCENT = 1.0; // Simulated radius for collision check
+        const PICKUP_RANGE = 4.0; // Robot can pick up if within 4% of map units distance
+
+        // --- Chart Instance (must be global or accessible) ---
+        let velocityChart = null;
+
+        // --- State Management ---
+        const state = {
+            connected: true,
+            authReady: false,
+            persistenceLogging: true, 
+            pathTracking: true,       
+            battery: 87.5,
+            steps: 0,
+            x: 50, 
+            y: 50,
+            targetSpeed: 1.5, // User's desired speed (m/s)
+            currentSpeed: 0.0, // Actual current speed (m/s)
+            currentDirection: 'STOP', 
+            path: [{x: 50, y: 50}],
+            logs: [],
+            localSummaryLogs: [], // NEW: Store logs locally when anonymous
+            updating: false,
+            analyzing: false,
+            velocityHistory: Array(VELOCITY_HISTORY_LENGTH).fill(0),
+            leftHandAngle: 180, // 0=Down, 90=Straight Out, 180=Up
+            rightHandAngle: 0,  // 0=Down, 90=Straight Out, 180=Up
+            leftHandAxis: 'Pitch', 
+            rightHandAxis: 'Pitch',
+            isFallen: false, 
+            
+            // --- NEW: Cargo State ---
+            hasBox: false, // Tracks if the robot is carrying a box
+            boxLocation: { x: 15, y: 70, size: 5, label: 'Cargo Box' }, // The current position of the box
+            
+            // --- Simulated Obstacle Map ---
+            obstacles: [
+                // Obstacles defined as {x: center_x, y: center_y, size: radius} in % map units
+                { x: 30, y: 30, size: 5, label: 'Pillar 1' },
+                { x: 75, y: 60, size: 8, label: 'Pillar 2' },
+                { x: 50, y: 85, size: 6, label: 'Crate' }
+            ]
+        };
+        
+        // --- Firebase Initialization and Auth ---
+        async function waitForFirebase(maxRetries = 10) {
+            let retries = 0;
+            while (!window.firebase && retries < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                retries++;
+            }
+            if (!window.firebase) throw new Error("Firebase module failed to load.");
+        }
+
+        async function initFirebase() {
+            try {
+                // Ensure the module script has run
+                await waitForFirebase();
+
+                if (!firebaseConfig) {
+                    addLog("⚠️ Firebase configuration missing. Running in Offline Mode.", 'warn');
+                    // We allow the user to see the button, but it might fail. 
+                    // To satisfy the user request, we won't disable it hard, but clicking it will just log error.
+                    return;
+                }
+
+                const app = firebase.initializeApp(firebaseConfig);
+                // Initialize Firestore with the named database 'robotapp'
+                db = firebase.getFirestore(app, "robotapp");
+                auth = firebase.getAuth(app);
+                
+                // Set up Google Provider
+                window.googleProvider = new firebase.GoogleAuthProvider();
+
+                // Auth State Listener
+                firebase.onAuthStateChanged(auth, (user) => {
+                    const authBtn = document.getElementById('authBtn');
+                    const displayUser = document.getElementById('displayUserId');
+                    const authStatusMsg = document.getElementById('authStatusMsg');
+                    const persistenceIndicator = document.getElementById('persistenceIndicator');
+                    
+                    if (user) {
+                        userId = user.uid;
+                        state.authReady = true;
+                        displayUser.innerText = user.displayName || 'User'; 
+                        
+                        if(authStatusMsg) authStatusMsg.innerHTML = '<span class="text-emerald-400">✅ Authenticated. Cloud Persistence Active.</span>';
+                        if(persistenceIndicator) {
+                            persistenceIndicator.innerText = "CLOUD SYNCED";
+                            persistenceIndicator.classList.replace('text-orange-400', 'text-emerald-400');
+                            persistenceIndicator.classList.replace('bg-orange-900/50', 'bg-emerald-900/50');
+                        }
+
+                        // Update Button to Sign Out state
+                        if(authBtn) {
+                            authBtn.innerHTML = "Sign Out";
+                            authBtn.classList.remove('bg-white', 'hover:bg-slate-100', 'text-slate-900', 'border-slate-200');
+                            authBtn.classList.add('bg-slate-700', 'hover:bg-slate-600', 'text-white', 'border-slate-600');
+                        }
+
+                        addLog(`Authenticated as ${user.displayName || 'User'}`, 'success');
+                        
+                        // Setup Realtime Listeners
+                        setupPersistenceSnapshot(); 
+                    } else {
+                        userId = 'anonymous';
+                        state.authReady = false;
+                        displayUser.innerText = 'Guest';
+                        
+                        if(authStatusMsg) authStatusMsg.innerHTML = '⚠️ You are currently in Guest Mode. Data is stored locally. Sign in to enable Cloud Persistence.';
+                        if(persistenceIndicator) {
+                            persistenceIndicator.innerText = "LOCAL RAM";
+                            persistenceIndicator.classList.replace('text-emerald-400', 'text-orange-400');
+                            persistenceIndicator.classList.replace('bg-emerald-900/50', 'bg-orange-900/50');
+                        }
+
+                        // Update Button to Sign In state
+                        if(authBtn) {
+                            authBtn.innerHTML = '<span class="text-lg">G</span> Sign In with Google';
+                            authBtn.classList.remove('bg-slate-700', 'hover:bg-slate-600', 'text-white', 'border-slate-600');
+                            authBtn.classList.add('bg-white', 'hover:bg-slate-100', 'text-slate-900', 'border-slate-200');
+                        }
+                        
+                        addLog("Guest mode active. Logs will be stored in local memory.", 'warn');
+                        
+                        // Switch back to local logs view
+                        updatePersistenceTable(state.localSummaryLogs);
+                        
+                        // Detach firebase listener if any
+                        if(persistenceUnsubscribe) persistenceUnsubscribe();
+                    }
+                });
+
+            } catch (e) {
+                addLog(`Firebase connection failed: ${e.message}`, 'error');
+            }
+        }
+        
+        // --- Auth Toggle Logic ---
+        async function toggleAuth() {
+            // Safety check for Firebase object
+            if (!window.firebase || !auth) {
+                if(!firebaseConfig) {
+                    addLog("Cannot sign in: No Firebase configuration found.", 'error');
+                } else {
+                    addLog("Cannot sign in: Firebase SDK not initialized yet. Please wait...", 'error');
+                }
+                return;
+            }
+            const authBtn = document.getElementById('authBtn');
+            
+            if (auth.currentUser) {
+                try {
+                    await firebase.signOut(auth);
+                    addLog("Signed out successfully.", 'success');
+                } catch(e) {
+                    addLog(`Sign out failed: ${e.message}`, 'error');
+                }
+            } else {
+                try {
+                    if(authBtn) authBtn.innerText = "Signing in...";
+                    // Check if provider is available
+                    if (!window.googleProvider) {
+                        // Attempt re-init if provider missing but firebase exists
+                        window.googleProvider = new firebase.GoogleAuthProvider();
+                    }
+                    await firebase.signInWithPopup(auth, window.googleProvider);
+                    // onAuthStateChanged will handle the rest
+                } catch(e) {
+                    addLog(`Sign in failed: ${e.message}`, 'error');
+                    // Reset button style
+                    if(authBtn) {
+                         authBtn.innerHTML = '<span class="text-lg">G</span> Sign In with Google';
+                    }
+                }
+            }
+        }
+
+        // --- Logging Utility ---
+        function addLog(message, type = 'info') {
+            const logConsole = document.getElementById('logConsole');
+            const now = new Date();
+            const timeString = `[${now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}]`;
+            
+            let colorClass = 'text-slate-500';
+            if (type === 'success') colorClass = 'text-emerald-400';
+            if (type === 'warn') colorClass = 'text-yellow-400';
+            if (type === 'error') colorClass = 'text-red-400';
+            if (type === 'control') colorClass = 'text-blue-400';
+
+            const logEntry = document.createElement('div');
+            logEntry.className = colorClass;
+            logEntry.innerHTML = `<span class="text-slate-600">${timeString}</span> ${message}`;
+            
+            state.logs.push(message); // Keep the logs for diagnosis
+            
+            logConsole.appendChild(logEntry);
+            // Scroll to the bottom
+            logConsole.scrollTop = logConsole.scrollHeight;
+        }
+
+        // --- Gemini API Handler ---
+        async function handleApiCall(payload, retries = 0) {
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 429 && retries < MAX_RETRIES) {
+                    const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+                    // No console log on retry as per instructions
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return handleApiCall(payload, retries + 1);
+                }
+
+                if (!response.ok) {
+                    throw new Error(`API call failed with status ${response.status}`);
+                }
+
+                const result = await response.json();
+                const candidate = result.candidates?.[0];
+
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    return candidate.content.parts[0].text;
+                }
+                
+                throw new Error("Invalid response structure from Gemini API.");
+
+            } catch (error) {
+                // Log the final error attempt
+                addLog(`Gemini API Error: ${error.message}`, 'error');
+                return "Error: Could not retrieve AI diagnosis.";
+            }
+        }
+
+        // --- AI Diagnosis Expert ---
+        async function analyzeLogs() {
+            if (state.analyzing) return;
+            state.analyzing = true;
+            document.getElementById('diagnosisBtn').disabled = true;
+            document.getElementById('diagnosisLoading').classList.remove('hidden');
+            document.getElementById('logDiagnosisContainer').innerHTML = `<span class="text-indigo-400">Analyzing ${state.logs.length} log entries...</span>`;
+
+            // Limit logs to the last 20 for prompt conciseness
+            const recentLogs = state.logs.slice(-20).join('\n');
+            
+            const systemPrompt = "You are the Bosch Robot Diagnosis Expert. Analyze the provided system logs and current robot state. Provide a concise, single-paragraph summary of any issues found (even minor ones) and give one specific, actionable recommendation to improve performance or address a concern. Start with 'Diagnosis:'";
+            
+            const userQuery = `Analyze the following system logs and current robot status:\n\n--- Logs ---\n${recentLogs}\n\n--- Current State ---\nTarget Speed: ${state.targetSpeed} m/s\nActual Speed: ${state.currentSpeed} m/s\nBattery: ${state.battery}%\nSteps: ${state.steps}\nDirection: ${state.currentDirection}\nFallen Status: ${state.isFallen ? 'YES' : 'NO'}\nCargo Status: ${state.hasBox ? 'Carrying Box' : 'No Box'}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            const diagnosisText = await handleApiCall(payload);
+            
+            document.getElementById('logDiagnosisContainer').innerText = diagnosisText;
+            state.analyzing = false;
+            document.getElementById('diagnosisBtn').disabled = false;
+            document.getElementById('diagnosisLoading').classList.add('hidden');
+        }
+
+        // --- Telemetry and Dashboard Update Logic ---
+        function updateTelemetryTable(data) {
+            const tbody = document.getElementById('telemetryTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = `
+                <tr><td>Timestamp (Local)</td><td>${data.localTime}</td></tr>
+                <tr><td>Robot ID</td><td>${data.robotId}</td></tr>
+                <tr><td>Position (X/Y)</td><td>${data.positionX_percent}% / ${data.positionY_percent}%</td></tr>
+                <tr><td>Speed (m/s)</td><td>${data.speed_ms}</td></tr>
+                <tr><td>Target Speed (m/s)</td><td>${data.target_speed_ms}</td></tr>
+                <tr><td>Direction</td><td>${data.direction}</td></tr>
+                <tr><td>Status</td><td>${data.is_fallen ? 'FALLEN' : 'OPERATIONAL'}</td></tr>
+                <tr><td>Cargo Attached</td><td>${data.has_box ? 'YES' : 'NO'}</td></tr>
+                <tr><td>Battery (%)</td><td>${data.battery_percent}</td></tr>
+                <tr><td>Left Arm Pitch (°)</td><td>${data.left_arm_pitch_deg}d°</td></tr>
+                <tr><td>Right Arm Pitch (°)</td><td>${data.right_arm_pitch_deg}d°</td></tr>
+            `;
+            // Add a log entry for movement change
+            if (state.currentDirection !== 'STOP' && state.currentSpeed > 0) {
+                 // Log less frequently to avoid spam
+                 if (Math.floor(Date.now() / 1000) % 10 === 0) { 
+                    addLog(`Telemetry Sent: Pos ${data.positionX_percent.toFixed(1)}, Speed ${data.speed_ms.toFixed(1)}, Box: ${data.has_box ? 'Y' : 'N'}`, 'info');
+                 }
+            }
+        } // Close updateTelemetryTable
+
+        // --- Distance Check Utility ---
+        function getDistance(x1, y1, x2, y2) {
+            const dx = x1 - x2;
+            const dy = y1 - y2;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // --- Collision Detection Logic ---
+        function checkCollision(nextX, nextY) {
+            // Note: nextX, nextY are in % units (0-100)
+            for (const obs of state.obstacles) {
+                const distance = getDistance(nextX, nextY, obs.x, obs.y);
+                // Collision occurs if distance is less than sum of robot radius and obstacle radius
+                if (distance < (obs.size / 2) + ROBOT_RADIUS_PERCENT) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // --- Core Dashboard Update & Map Drawing ---
+        function updateDashboard() {
+            // Update KPI values
+            document.getElementById('batteryVal').innerText = state.battery.toFixed(1) + '%';
+            document.getElementById('signalVal').innerText = '-42 dBm'; 
+            document.getElementById('speedVal').innerText = state.currentSpeed.toFixed(1) + ' m/s';
+            document.getElementById('directionVal').innerText = state.currentDirection;
+            document.getElementById('displayTargetSpeed').innerText = state.targetSpeed.toFixed(1) + ' m/s';
+            
+            // Cargo Status Update
+            const cargoStatusElement = document.getElementById('cargoStatus');
+            const pickUpBtn = document.getElementById('pickUpBtn');
+            const placeBoxBtn = document.getElementById('placeBoxBtn');
+            const distanceToBox = getDistance(state.x, state.y, state.boxLocation.x, state.boxLocation.y);
+            const isNearBox = distanceToBox <= PICKUP_RANGE;
+
+            if (state.hasBox) {
+                cargoStatusElement.innerHTML = `<span class="text-emerald-400">📦 Box Attached.</span>`;
+                pickUpBtn.disabled = true;
+                placeBoxBtn.disabled = false;
+                placeBoxBtn.classList.replace('bg-cyan-700', 'bg-cyan-600');
+            } else {
+                if (isNearBox) {
+                    cargoStatusElement.innerHTML = `<span class="text-yellow-400">⚠️ Box in Range (${distanceToBox.toFixed(1)}%). Ready to pick up.</span>`;
+                    pickUpBtn.disabled = false;
+                    pickUpBtn.classList.replace('bg-purple-700', 'bg-purple-600');
+                } else {
+                    cargoStatusElement.innerHTML = `No Box Attached. Distance to target: ${distanceToBox.toFixed(1)}%.`;
+                    pickUpBtn.disabled = true;
+                    pickUpBtn.classList.replace('bg-purple-600', 'bg-purple-700');
+                }
+                placeBoxBtn.disabled = true;
+                placeBoxBtn.classList.replace('bg-cyan-600', 'bg-cyan-700');
+            }
+
+            // System State KPI Update
+            const stateKPI = document.getElementById('systemStateKPI');
+            const stateIcon = document.getElementById('stateIcon');
+            const stateVal = document.getElementById('stateVal');
+            
+            if (state.isFallen) {
+                stateKPI.classList.remove('bg-slate-800');
+                stateKPI.classList.add('bg-red-900/50', 'animate-pulse');
+                stateIcon.innerText = '🔴';
+                stateVal.innerText = 'FALLEN';
+                stateVal.classList.replace('text-emerald-400', 'text-red-400');
+            } else {
+                stateKPI.classList.add('bg-slate-800');
+                stateKPI.classList.remove('bg-red-900/50', 'animate-pulse');
+                stateIcon.innerText = state.hasBox ? '🟡' : '🟢';
+                stateVal.innerText = state.hasBox ? 'CARRYING' : 'OPERATIONAL';
+                stateVal.classList.replace('text-red-400', 'text-emerald-400');
+                if (state.hasBox) stateVal.classList.replace('text-emerald-400', 'text-yellow-400');
+            }
+            
+            // --- Control Button and Input Management ---
+            const controlButtons = document.querySelectorAll('.control-btn');
+            const controlInputs = document.querySelectorAll('.control-input');
+            const standUpBtn = document.getElementById('standUpBtn');
+            const fallRobotBtn = document.getElementById('fallRobotBtn');
+            
+            // Disable all movement controls when fallen
+            controlButtons.forEach(btn => {
+                const isSystemBtn = ['standUpBtn', 'fallRobotBtn', 'resetMapAndPath', 'pickUpBtn', 'placeBoxBtn', 'authBtn'].includes(btn.id);
+                if (!isSystemBtn) {
+                    btn.disabled = state.isFallen;
+                }
+            });
+            controlInputs.forEach(input => {
+                input.disabled = state.isFallen;
+            });
+
+            // Fall/Standup specific logic
+            fallRobotBtn.disabled = state.isFallen; // Cannot fall if already fallen
+
+            if (state.isFallen) {
+                standUpBtn.disabled = false;
+                standUpBtn.classList.remove('bg-blue-700', 'hover:bg-blue-600');
+                standUpBtn.classList.add('bg-blue-600', 'hover:bg-blue-500'); 
+                
+                if (standUpBtn.innerHTML === '🛠️ STANDING UP...') {
+                    standUpBtn.disabled = true;
+                }
+            } else {
+                standUpBtn.disabled = true;
+                standUpBtn.classList.add('bg-blue-700', 'hover:bg-blue-600');
+                standUpBtn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); 
+            }
+            
+            document.getElementById('posX').innerText = state.x.toFixed(1);
+            document.getElementById('posY').innerText = state.y.toFixed(1);
+            
+            // Update Hand Kinematics display
+            document.getElementById('leftHandAngle').innerText = state.leftHandAngle.toFixed(0) + '°';
+            document.getElementById('rightHandAngle').innerText = state.rightHandAngle.toFixed(0) + '°';
+            document.getElementById('leftHandAxis').innerText = state.leftHandAxis;
+            document.getElementById('rightHandAxis').innerText = state.rightHandAxis;
+
+            drawMap();
+            updateVelocityChart();
+        }
+
+        // --- Robot Logic Loop (Simulation) ---
+        function robotLogic() {
+            if (!state.connected) return;
+
+            // If robot has box, increase battery drain slightly
+            if (state.hasBox && !state.isFallen) {
+                state.battery = Math.max(0, state.battery - 0.001); 
+            }
+            
+            // Movement is prevented if fallen
+            if (state.isFallen) {
+                state.currentSpeed = 0.0;
+                if (Math.floor(Date.now() / 1000) % 5 === 0 && state.currentDirection === 'STOP') {
+                    addLog("Warning: Robot is stationary and fallen. Recovery required.", 'warn');
+                }
+                updateDashboard();
+                return;
+            }
+
+            // --- 1. Speed Adjustment (Acceleration/Deceleration) ---
+            const dt = ROBOT_LOGIC_INTERVAL_MS / 1000;
+            const acceleration = ACCELERATION_RATE;
+
+            if (state.currentDirection !== 'STOP') {
+                if (state.currentSpeed < state.targetSpeed) {
+                    state.currentSpeed = Math.min(state.targetSpeed, state.currentSpeed + acceleration * dt * 5); 
+                } else if (state.currentSpeed > state.targetSpeed) {
+                    state.currentSpeed = Math.max(state.targetSpeed, state.currentSpeed - acceleration * dt * 2); 
+                }
+            } else {
+                state.currentSpeed = Math.max(0, state.currentSpeed - acceleration * dt * 4); 
+            }
+
+            // --- 2. Simulate Position Movement with Avoidance ---
+            const speed_normalized = state.currentSpeed * dt * 0.5; // m/s to % movement
+            let dx = 0, dy = 0;
+
+            if (state.currentDirection === 'UP') dy = -speed_normalized;
+            else if (state.currentDirection === 'DOWN') dy = speed_normalized;
+            else if (state.currentDirection === 'LEFT') dx = -speed_normalized;
+            else if (state.currentDirection === 'RIGHT') dx = speed_normalized;
+
+            let nextX = state.x + dx;
+            let nextY = state.y + dy;
+            
+            // Boundary check (constrain movement before collision check to prevent checking outside 0-100)
+            nextX = Math.min(100, Math.max(0, nextX));
+            nextY = Math.min(100, Math.max(0, nextY));
+
+            // --- Collision Detection & Avoidance ---
+            if (state.currentDirection !== 'STOP' && state.currentSpeed > 0.01 && checkCollision(nextX, nextY)) {
+                addLog(`🛑 Obstacle detected at (${nextX.toFixed(1)}, ${nextY.toFixed(1)})! Initiating avoidance maneuver.`, 'error');
+                
+                state.currentSpeed = 0.0;
+                
+                const current = state.currentDirection;
+                let potentialTurns = [];
+                
+                if (current === 'UP' || current === 'DOWN') {
+                    potentialTurns = ['LEFT', 'RIGHT'];
+                } else {
+                    potentialTurns = ['UP', 'DOWN'];
+                }
+                
+                let safeTurn = potentialTurns.find(turn => {
+                    let tempDx = 0, tempDy = 0;
+                    if (turn === 'UP') tempDy = -speed_normalized * 2; 
+                    else if (turn === 'DOWN') tempDy = speed_normalized * 2;
+                    else if (turn === 'LEFT') tempDx = -speed_normalized * 2;
+                    else if (turn === 'RIGHT') tempDx = speed_normalized * 2;
+                    
+                    return !checkCollision(state.x + tempDx, state.y + tempDy);
+                });
+
+                if (safeTurn) {
+                    state.currentDirection = safeTurn;
+                    addLog(`🔄 Avoiding obstacle: Changing direction to ${safeTurn} and accelerating.`, 'warn');
+                } else {
+                    state.currentDirection = 'STOP';
+                    addLog("🚫 Trapped! No immediate safe turn found. Halting.", 'error');
+                }
+                
+                updateDashboard();
+                return; // Skip position update for this cycle
+            }
+
+            // If no collision, apply movement
+            state.x = nextX;
+            state.y = nextY;
+            
+            // If carrying box, update box location to match robot
+            if (state.hasBox) {
+                state.boxLocation.x = state.x;
+                state.boxLocation.y = state.y;
+            }
+
+            // ... 3. Simulate battery drain
+            state.battery = Math.max(0, state.battery - 0.005 * (state.currentSpeed / 3.0)); 
+            if (state.battery < 10 && state.battery > 9.995) {
+                addLog("CRITICAL: Battery level is below 10%. Initiating low power mode.", 'error');
+            }
+
+            // 4. Update path and steps
+            if (state.currentDirection !== 'STOP' && state.currentSpeed > 0.01) {
+                state.steps += 1;
+                // Only log path if tracking is enabled
+                if (state.pathTracking) {
+                    if (state.path.length === 0 || state.path[state.path.length - 1].x.toFixed(1) !== state.x.toFixed(1) || state.path[state.path.length - 1].y.toFixed(1) !== state.y.toFixed(1)) {
+                        state.path.push({ x: state.x, y: state.y });
+                    }
+                }
+            } else if (state.currentSpeed < 0.01) {
+                // Ensure state is STOP if speed is near zero
+                if (state.currentDirection !== 'STOP') state.currentDirection = 'STOP'; 
+            }
+
+            // 5. Update velocity history for chart
+            state.velocityHistory.shift();
+            state.velocityHistory.push(state.currentSpeed);
+            
+            updateDashboard();
+        }
+
+        // --- Telemetry Send Loop (100ms) ---
+        async function sendTelemetry() {
+            // Prepare Data
+            const telemetryData = {
+                robotId: 'Bosch-S4-HNM',
+                localTime: new Date().toLocaleTimeString('en-US'),
+                timestamp: firebase.serverTimestamp(),
+                userId: userId,
+                positionX_percent: parseFloat(state.x.toFixed(2)),
+                positionY_percent: parseFloat(state.y.toFixed(2)),
+                target_speed_ms: parseFloat(state.targetSpeed.toFixed(2)),
+                speed_ms: parseFloat(state.currentSpeed.toFixed(2)),
+                direction: state.currentDirection,
+                battery_percent: parseFloat(state.battery.toFixed(1)),
+                steps_moved_total: state.steps,
+                is_fallen: state.isFallen, 
+                has_box: state.hasBox, // NEW: Cargo status
+                left_arm_pitch_deg: state.leftHandAngle,
+                right_arm_pitch_deg: state.rightHandAngle,
+            };
+            
+            // 1. ALWAYS update local mirror (UI) regardless of Auth
+            updateTelemetryTable(telemetryData);
+
+            // 2. Auth Guard for Cloud Write
+            if (!state.connected || !state.authReady || userId === 'anonymous') return;
+
+            // 3. Send to Firestore (User Specific Collection)
+            // FIXED: Removed extra 'data' segment to ensure odd number of segments (5)
+            const telemetryCollectionPath = `artifacts/${appId}/users/${userId}/telemetry_data`;
+            try {
+                await firebase.addDoc(firebase.collection(db, telemetryCollectionPath), telemetryData);
+            } catch (e) {
+                addLog(`Firestore Telemetry Write Failed: ${e.message}`, 'error');
+            }
+        }
+
+        // --- Summary Persistence Loop (5s) ---
+        async function sendSummaryLog() {
+            // Prepare Data
+            const summaryData = {
+                timestamp: firebase.serverTimestamp(),
+                time_local: new Date().toLocaleTimeString('en-US'),
+                userId: userId,
+                x_percent: parseFloat(state.x.toFixed(1)),
+                y_percent: parseFloat(state.y.toFixed(1)),
+                max_speed_ms: parseFloat(state.velocityHistory.reduce((a, b) => Math.max(a, b), 0).toFixed(1)),
+                avg_speed_ms: parseFloat((state.velocityHistory.reduce((a, b) => a + b) / state.velocityHistory.length).toFixed(1)),
+                battery_percent: parseFloat(state.battery.toFixed(1)),
+                total_steps: state.steps,
+                was_fallen: state.isFallen,
+                carried_box: state.hasBox,
+            };
+
+            // 1. GUEST MODE: Update local array and table immediately
+            if (userId === 'anonymous') {
+                 // Add to local logs array
+                 state.localSummaryLogs.unshift(summaryData);
+                 if (state.localSummaryLogs.length > 10) state.localSummaryLogs.pop(); // Keep last 10
+                 
+                 // Directly update table from local state
+                 updatePersistenceTable(state.localSummaryLogs);
+                 return; 
+            }
+
+            // 2. AUTH MODE: Guard for connectivity
+            if (!state.connected || !state.authReady || !state.persistenceLogging) return;
+
+            // 3. Send to Firestore (Snapshot listener will update UI)
+            // FIXED: Removed extra 'data' segment to ensure odd number of segments (5)
+            const summaryCollectionPath = `artifacts/${appId}/users/${userId}/summary_logs`;
+            try {
+                await firebase.addDoc(firebase.collection(db, summaryCollectionPath), summaryData);
+                addLog(`Persistence Log Sent: State ${state.isFallen ? 'FALLEN' : 'OK'}, Speed Avg: ${summaryData.avg_speed_ms}`, 'success');
+            } catch (e) {
+                addLog(`Firestore Summary Log Write Failed: ${e.message}`, 'error');
+            }
+        }
+        
+        // --- Persistence Snapshot Listener ---
+        let persistenceUnsubscribe = null;
+        function setupPersistenceSnapshot() {
+            if (!db) return;
+            if (persistenceUnsubscribe) persistenceUnsubscribe(); // Detach previous listener
+
+            // If anonymous, rely on local array updates in sendSummaryLog, do not attach DB listener
+            if(userId === 'anonymous') return;
+
+            // FIXED: Removed extra 'data' segment to ensure odd number of segments (5)
+            const summaryCollectionPath = `artifacts/${appId}/users/${userId}/summary_logs`;
+            const q = firebase.query(
+                firebase.collection(db, summaryCollectionPath), 
+                firebase.orderBy('timestamp', 'desc'), 
+                firebase.limit(10) // Limit to last 10 entries for the table view
+            );
+
+            persistenceUnsubscribe = firebase.onSnapshot(q, (snapshot) => {
+                const logs = [];
+                snapshot.forEach((doc) => {
+                    logs.push(doc.data());
+                });
+                updatePersistenceTable(logs.reverse()); // Reverse to show oldest at top, newest at bottom
+            }, (error) => {
+                addLog(`Error listening to persistence logs: ${error.message}`, 'error');
+            });
+        }
+
+        // --- Update Persistence Table (UI) ---
+        function updatePersistenceTable(logs) {
+            const tbody = document.getElementById('persistenceTableBody');
+            if(!tbody) return;
+            tbody.innerHTML = '';
+            
+            if(logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-slate-500 py-4 italic">Waiting for data...</td></tr>';
+                return;
+            }
+            
+            logs.forEach(log => {
+                const row = `
+                    <tr>
+                        <td class="text-slate-500">${log.time_local || 'N/A'}</td>
+                        <td class="text-white">${log.x_percent.toFixed(1)} / ${log.y_percent.toFixed(1)}</td>
+                        <td class="text-white">${log.avg_speed_ms.toFixed(1)}</td>
+                        <td class="text-white">${log.battery_percent.toFixed(0)}</td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+
+        // --- Control Functions ---
+        
+        // NEW: Update target speed from slider
+        function updateTargetSpeed(value) {
+            state.targetSpeed = parseFloat(value);
+            // This will trigger updateDashboard via robotLogic loop
+        }
+
+        // Pick up the box logic
+        function pickUpBox() {
+            if (state.hasBox) {
+                addLog("Robot is already carrying a box.", 'warn');
+                return;
+            }
+            if (state.isFallen) {
+                addLog("Cannot pick up: Robot is fallen.", 'error');
+                return;
+            }
+            const distanceToBox = getDistance(state.x, state.y, state.boxLocation.x, state.boxLocation.y);
+            
+            if (distanceToBox <= PICKUP_RANGE) {
+                state.hasBox = true;
+                // Move the box coordinates to the robot's current position instantly
+                state.boxLocation.x = state.x;
+                state.boxLocation.y = state.y;
+                addLog("✅ Cargo acquired! Box state updated to 'Attached'.", 'success');
+            } else {
+                addLog(`🚫 Failed to pick up: Box is too far. Distance: ${distanceToBox.toFixed(1)}% (Max Range: ${PICKUP_RANGE}%)`, 'error');
+            }
+            updateDashboard();
+        }
+
+        // Place the box logic
+        function placeBox() {
+            if (!state.hasBox) {
+                addLog("Robot is not carrying a box.", 'warn');
+                return;
+            }
+            if (state.isFallen) {
+                addLog("Cannot place box: Robot is fallen.", 'error');
+                return;
+            }
+
+            // Box is placed exactly at the robot's feet (current x, y)
+            // State is updated; robot is now free
+            state.hasBox = false;
+            addLog("✅ Cargo placed! Box is now stationary at robot's current location.", 'success');
+            updateDashboard();
+        }
+
+        function toggleConnection() {
+            state.connected = !state.connected;
+            const statusElement = document.getElementById('connStatus');
+            const btn = document.getElementById('connBtn');
+            if (state.connected) {
+                statusElement.innerText = '● LIVE CONNECTION';
+                statusElement.classList.replace('text-red-400', 'text-emerald-400');
+                statusElement.classList.add('animate-pulse');
+                btn.innerText = 'Disconnect';
+                addLog("System connection restored.", 'success');
+            } else {
+                statusElement.innerText = '● DISCONNECTED';
+                statusElement.classList.replace('text-emerald-400', 'text-red-400');
+                statusElement.classList.remove('animate-pulse');
+                btn.innerText = 'Connect';
+                addLog("System connection severed.", 'error');
+            }
+            updateDashboard();
+        }
+        
+        function togglePersistenceLog() {
+            state.persistenceLogging = !state.persistenceLogging;
+            const btn = document.getElementById('persistenceToggleBtn');
+            const indicator = document.getElementById('persistenceIndicator');
+
+            if (state.persistenceLogging) {
+                btn.innerText = 'Stop Log';
+                btn.classList.replace('bg-green-700', 'bg-red-700');
+                if(userId !== 'anonymous') {
+                     indicator.innerText = 'CLOUD SYNCED';
+                     indicator.classList.add('animate-pulse');
+                } else {
+                     indicator.innerText = 'LOCAL RAM';
+                     indicator.classList.add('animate-pulse');
+                }
+                
+                startSummaryLogLoop();
+                addLog("Persistence logging resumed.", 'success');
+            } else {
+                btn.innerText = 'Start Log';
+                btn.classList.replace('bg-red-700', 'bg-green-700');
+                indicator.innerText = 'LOG PAUSED';
+                indicator.classList.remove('animate-pulse');
+                clearInterval(summaryLogInterval);
+                addLog("Persistence logging paused.", 'warn');
+            }
+        }
+
+        // Toggle Path Tracking
+        function togglePathTracking() {
+            state.pathTracking = !state.pathTracking;
+            const btn = document.getElementById('pathTrackingBtn');
+            const status = document.getElementById('pathStatus');
+
+            if (state.pathTracking) {
+                btn.innerText = 'Stop Tracking';
+                btn.classList.replace('bg-green-700', 'bg-red-700');
+                status.innerText = 'LIVE TRACKING';
+                status.classList.replace('bg-red-900/30', 'bg-blue-900/30');
+                addLog("Path tracking resumed.", 'control');
+            } else {
+                btn.innerText = 'Start Tracking';
+                btn.classList.replace('bg-red-700', 'bg-green-700');
+                status.innerText = 'PAUSED';
+                status.classList.replace('bg-blue-900/30', 'bg-red-900/30');
+                addLog("Path tracking paused.", 'warn');
+            }
+            drawMap(); // Redraw map to show change in path rendering
+        }
+        
+        // Explicitly starts the robot
+        function startRobot() {
+            if (!state.connected) {
+                 addLog("Cannot start: Robot is disconnected.", 'error');
+                 return;
+            }
+            if (state.isFallen) {
+                addLog("Robot is fallen. Cannot initiate movement until recovery.", 'error');
+                return;
+            }
+            if (state.currentDirection !== 'STOP' && state.currentSpeed > 0.01) {
+                 addLog("Robot is already moving. Use D-Pad to change direction.", 'warn');
+                 return;
+            }
+            // If stopped, start moving UP and robotLogic will accelerate towards targetSpeed
+            state.currentDirection = 'UP'; 
+            addLog(`▶️ START: Initiating default movement (UP) at target speed ${state.targetSpeed.toFixed(1)} m/s.`, 'control');
+            updateDashboard();
+        }
+
+        // Instantly stops the robot
+        function stopRobot() {
+            if (!state.connected) {
+                 addLog("Cannot stop: Robot is disconnected.", 'error');
+                 return;
+            }
+            state.currentDirection = 'STOP';
+            // Speed will naturally decelerate to 0 in robotLogic
+            addLog("🛑 EMERGENCY STOP: Movement halted. Decelerating to 0.", 'error');
+            updateDashboard();
+        }
+
+        // Simulates a fall event
+        function fallRobot() {
+            if (state.isFallen) return; 
+            if (!state.connected) {
+                 addLog("Cannot simulate fall: Robot is disconnected.", 'error');
+                 return;
+            }
+            state.isFallen = true;
+            state.currentDirection = 'STOP';
+            state.currentSpeed = 0.0;
+            if (state.hasBox) {
+                state.hasBox = false; // Drop the box on impact
+                addLog("📦 Cargo dropped due to impact force.", 'error');
+            }
+            addLog("🚨 CRITICAL ERROR: Fall event detected! All movement halted.", 'error');
+            updateDashboard();
+        }
+
+        // Initiates autonomous stand-up sequence
+        async function standUpRobot() {
+            if (!state.isFallen) {
+                addLog("Robot is already upright.", 'warn');
+                return;
+            }
+            
+            const standUpBtn = document.getElementById('standUpBtn');
+            standUpBtn.disabled = true; // Lock button instantly
+            standUpBtn.innerHTML = '🛠️ STANDING UP...';
+            
+            addLog("🤖 Initiating autonomous stand-up sequence (5s delay).", 'control');
+            
+            // Simulate the time taken for the recovery sequence (5 seconds)
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            state.isFallen = false;
+            standUpBtn.innerHTML = '🧍 Stand Up';
+            
+            addLog("✅ Stand-up complete. Robot systems are operational and awaiting command.", 'success');
+            updateDashboard(); 
+        }
+
+
+        function resetMapAndPath() {
+            state.x = 50;
+            state.y = 50;
+            state.path = [{x: 50, y: 50}];
+            state.steps = 0;
+            state.currentSpeed = 0.0;
+            state.currentDirection = 'STOP';
+            state.isFallen = false; // Ensure it stands up if reset
+            state.hasBox = false; // Drop/reset cargo
+            state.boxLocation = { x: 15, y: 70, size: 5, label: 'Cargo Box' }; // Reset box position
+            addLog("Map, path, cargo, and robot state reset to origin (50, 50).", 'control');
+            updateDashboard();
+        }
+
+        function moveRobot(direction) {
+            if (!state.connected) {
+                 addLog("Cannot move: Robot is disconnected.", 'error');
+                 return;
+            }
+            if (state.isFallen) {
+                addLog("Robot is fallen. Cannot process movement command.", 'error');
+                return;
+            }
+            // Directional buttons always set direction. robotLogic will handle acceleration to targetSpeed.
+            state.currentDirection = direction;
+            addLog(`Movement command received: ${direction} (Target Speed: ${state.targetSpeed.toFixed(1)} m/s)`, 'control');
+        }
+
+        // Updated moveHand to only adjust angle
+        function moveHand(arm, axis, delta) {
+            if (!state.connected) return;
+            if (state.isFallen) {
+                addLog("Robot is fallen. Hand kinematics control is locked.", 'error');
+                return;
+            }
+            
+            let angle;
+            if (arm === 'LEFT') {
+                angle = state.leftHandAngle + delta;
+                // Constraints: 0 (Down) to 180 (Up)
+                state.leftHandAngle = Math.min(180, Math.max(0, angle)); 
+                state.leftHandAxis = axis;
+            } else if (arm === 'RIGHT') {
+                angle = state.rightHandAngle + delta;
+                // Constraints: 0 (Down) to 180 (Up)
+                state.rightHandAngle = Math.min(180, Math.max(0, angle)); 
+                state.rightHandAxis = axis;
+            }
+            addLog(`${arm} Arm Kinematics adjusted: ${axis} by ${delta}° (New Angle: ${arm === 'LEFT' ? state.leftHandAngle : state.rightHandAngle}°)`, 'control');
+            updateDashboard();
+        }
+
+        // New function to set hand angle directly
+        function setHand(arm, angle) {
+            if (!state.connected) return;
+            if (state.isFallen) {
+                addLog("Robot is fallen. Hand kinematics control is locked.", 'error');
+                return;
+            }
+            if (arm === 'LEFT') {
+                state.leftHandAngle = angle;
+                state.leftHandAxis = 'Pitch';
+            } else if (arm === 'RIGHT') {
+                state.rightHandAngle = angle;
+                state.rightHandAxis = 'Pitch';
+            }
+            addLog(`${arm} Arm Kinematics reset to ${angle}° (Pitch).`, 'control');
+            updateDashboard();
+        }
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (state.isFallen) return; // Prevent movement when fallen
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault(); 
+                let direction;
+                if (e.key === 'ArrowUp') direction = 'UP';
+                else if (e.key === 'ArrowDown') direction = 'DOWN';
+                else if (e.key === 'ArrowLeft') direction = 'LEFT';
+                else if (e.key === 'ArrowRight') direction = 'RIGHT';
+
+                moveRobot(direction);
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (state.isFallen) return; // Ignore keyup when fallen
+            // Keyup sets direction to stop, which relies on deceleration in robotLogic loop
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                state.currentDirection = 'STOP';
+            }
+        });
+
+        // --- Chart & Map Drawing ---
+
+        function initVelocityChart() {
+            const ctx = document.getElementById('velocityChart').getContext('2d');
+            
+            // Create 400 blank labels. We will use a callback for intelligent tick display.
+            const labels = Array.from({ length: VELOCITY_HISTORY_LENGTH }, (_, i) => i.toString());
+            
+            velocityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Current Speed (m/s)',
+                        data: state.velocityHistory,
+                        borderColor: '#22c55e', 
+                        backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 1, // Reduced point size for dense data
+                        pointBackgroundColor: '#fff',
+                        borderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 3.0, // Set maximum to 3.0 m/s as requested
+                            title: { display: true, text: 'Speed (m/s)', color: '#94a3b8' },
+                            grid: { color: '#1e293b' },
+                            ticks: { color: '#94a3b8' }
+                        },
+                        x: {
+                            title: { display: true, text: 'Time Back', color: '#94a3b8' },
+                            grid: { display: false },
+                            ticks: {
+                                // Only display ticks every 40 points (40 * 50ms = 2000ms = 2s)
+                                autoSkip: false,
+                                maxRotation: 0,
+                                minRotation: 0,
+                                callback: function(val, index) {
+                                    // Calculate time back in seconds
+                                    const timeBackSteps = VELOCITY_HISTORY_LENGTH - 1 - index;
+                                    const timeBackSeconds = timeBackSteps * (ROBOT_LOGIC_INTERVAL_MS / 1000);
+
+                                    // Check if this point aligns with a 2-second step (40 steps)
+                                    if (timeBackSteps % 40 === 0) {
+                                        if (timeBackSteps === 0) return 'Now';
+                                        return `-${timeBackSeconds.toFixed(0)}s`; 
+                                    }
+                                    return ''; // Hide other ticks
+                                },
+                                color: '#94a3b8'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { mode: 'index', intersect: false }
+                    }
+                }
+            });
+        }
+
+        function updateVelocityChart() {
+            if (velocityChart) {
+                velocityChart.data.datasets[0].data = state.velocityHistory;
+                velocityChart.update('none'); 
+            }
+        }
+
+        function drawMap() {
+            const canvas = document.getElementById('mapCanvas');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Utility function to convert percentage coordinates (0-100) to pixel values
+            const toPixels = (coord, dimension) => (coord / 100) * dimension;
+
+            const robotX = toPixels(state.x, width);
+            const robotY = toPixels(state.y, height);
+            
+            // --- Draw Obstacles ---
+            state.obstacles.forEach(obs => {
+                const obsX = toPixels(obs.x, width);
+                const obsY = toPixels(obs.y, height);
+                const obsR = toPixels(obs.size / 2, width); // Size is radius
+
+                ctx.beginPath();
+                ctx.arc(obsX, obsY, obsR, 0, Math.PI * 2);
+                ctx.fillStyle = '#b91c1c'; // Red-700
+                ctx.fill();
+                ctx.strokeStyle = '#ef4444'; // Red-500
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Draw label
+                ctx.fillStyle = '#fef2f2'; // Text color
+                ctx.font = '8px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(obs.label, obsX, obsY + obsR + 8);
+            });
+
+            // --- Draw Cargo Box (if not carried) ---
+            if (!state.hasBox) {
+                const boxX = toPixels(state.boxLocation.x, width);
+                const boxY = toPixels(state.boxLocation.y, height);
+                const boxSize = toPixels(state.boxLocation.size, width) / 1.5;
+
+                ctx.fillStyle = '#fcd34d'; // Yellow-300
+                ctx.strokeStyle = '#b45309'; // Amber-800
+                ctx.lineWidth = 2;
+                ctx.fillRect(boxX - boxSize / 2, boxY - boxSize / 2, boxSize, boxSize);
+                ctx.strokeRect(boxX - boxSize / 2, boxY - boxSize / 2, boxSize, boxSize);
+
+                // Draw label
+                ctx.fillStyle = '#1f2937'; 
+                ctx.font = '8px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('BOX', boxX, boxY + 3);
+            }
+
+
+            // Define robot dimensions (normalized size)
+            const BODY_HEIGHT = 20;
+            const BODY_WIDTH = 15;
+            const HEAD_RADIUS = 7;
+            const LIMB_LENGTH = 10;
+            const LIMB_THICKNESS = 3;
+            
+            // --- Draw Path ---
+            if (state.path.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = state.pathTracking ? '#3b82f6' : '#64748b'; 
+                ctx.lineWidth = 2;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+
+                ctx.moveTo(toPixels(state.path[0].x, width), toPixels(state.path[0].y, height));
+
+                state.path.forEach(point => {
+                    ctx.lineTo(toPixels(point.x, width), toPixels(point.y, height));
+                });
+
+                ctx.stroke();
+            }
+            
+            // --- DRAW ROBOT (The Cute Humanoid) ---
+            ctx.save();
+            ctx.translate(robotX, robotY);
+            
+            // Set up rotation if fallen
+            if (state.isFallen) {
+                // Tilted when fallen
+                ctx.rotate(Math.PI / 4); 
+                // Color change when fallen
+                ctx.fillStyle = '#ef4444'; // Red-500
+                ctx.strokeStyle = '#f97316'; // Orange-600
+                ctx.lineWidth = 2;
+            } else {
+                // Standing state colors
+                ctx.fillStyle = '#3b82f6'; // Blue-500
+                ctx.strokeStyle = '#fcd34d'; // Yellow-300
+                ctx.lineWidth = 2.5;
+            }
+            
+            const robotCenterY = -BODY_HEIGHT / 2; // Offset to make the entire robot centered on the map point (x, y)
+
+            // 1. Draw Legs (Always below the body)
+            const drawLeg = (offsetX, thighAngle, shinAngle) => {
+                ctx.save();
+                ctx.translate(offsetX, robotCenterY + BODY_HEIGHT / 2); // Start point at bottom center of body
+                ctx.rotate(thighAngle);
+                
+                // Thigh
+                ctx.beginPath();
+                ctx.rect(-LIMB_THICKNESS / 2, 0, LIMB_THICKNESS, LIMB_LENGTH * 0.7);
+                ctx.fill();
+                ctx.stroke();
+
+                // Shin
+                ctx.translate(0, LIMB_LENGTH * 0.7);
+                ctx.rotate(shinAngle - thighAngle); 
+                ctx.beginPath();
+                ctx.rect(-LIMB_THICKNESS / 2, 0, LIMB_THICKNESS, LIMB_LENGTH * 0.8);
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.restore();
+            };
+
+            if (!state.isFallen) {
+                // Standing/Moving pose
+                const step = state.currentSpeed > 0.1 ? Math.sin(Date.now() / 150) * 0.1 : 0; 
+                // Subtle animation for movement
+                drawLeg(-BODY_WIDTH/3, 0.1 + step, -0.1 - step); // Left Leg
+                drawLeg(BODY_WIDTH/3, -0.1 - step, 0.1 + step); // Right Leg
+            } else {
+                // Fallen pose - legs bent
+                drawLeg(-BODY_WIDTH/3, 0.5, -0.5); 
+                drawLeg(BODY_WIDTH/3, 0.5, -0.5); 
+            }
+            
+            // 2. Draw Body (Rounded Rectangle)
+            ctx.beginPath();
+            const radius = 3;
+            ctx.moveTo(-BODY_WIDTH/2 + radius, robotCenterY - BODY_HEIGHT / 2);
+            ctx.lineTo(BODY_WIDTH/2 - radius, robotCenterY - BODY_HEIGHT / 2);
+            ctx.quadraticCurveTo(BODY_WIDTH/2, robotCenterY - BODY_HEIGHT / 2, BODY_WIDTH/2, robotCenterY - BODY_HEIGHT / 2 + radius);
+            ctx.lineTo(BODY_WIDTH/2, robotCenterY + BODY_HEIGHT / 2 - radius);
+            ctx.quadraticCurveTo(BODY_WIDTH/2, robotCenterY + BODY_HEIGHT / 2, BODY_WIDTH/2 - radius, robotCenterY + BODY_HEIGHT / 2);
+            ctx.lineTo(-BODY_WIDTH/2 + radius, robotCenterY + BODY_HEIGHT / 2);
+            ctx.quadraticCurveTo(-BODY_WIDTH/2, robotCenterY + BODY_HEIGHT / 2, -BODY_WIDTH/2, robotCenterY + BODY_HEIGHT / 2 - radius);
+            ctx.lineTo(-BODY_WIDTH/2, robotCenterY - BODY_HEIGHT / 2 + radius);
+            ctx.quadraticCurveTo(-BODY_WIDTH/2, robotCenterY - BODY_HEIGHT / 2, -BODY_WIDTH/2 + radius, robotCenterY - BODY_HEIGHT / 2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+
+            // 3. Draw Head (Circle)
+            ctx.beginPath();
+            ctx.arc(0, robotCenterY - BODY_HEIGHT / 2 - HEAD_RADIUS * 1.5, HEAD_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#fef08a'; // Yellow-200
+            ctx.fill();
+            ctx.strokeStyle = '#3b82f6'; 
+            ctx.stroke();
+
+            // 4. Draw Arms (Kinematics Visualization - pitch angle)
+            const drawArm = (angle, sideMultiplier) => {
+                ctx.save();
+                
+                // Shoulder position (top corners of the body)
+                ctx.translate(sideMultiplier * BODY_WIDTH / 2, robotCenterY - BODY_HEIGHT / 2 + 5); 
+                
+                // Angle conversion: 90 deg (straight out) is 0 radians for our map drawing.
+                // state.angle 180 (up) -> -90 deg (map)
+                // state.angle 0 (down) -> 90 deg (map)
+                const mapAngle = (90 - angle) * (Math.PI / 180); 
+                ctx.rotate(mapAngle);
+                
+                // Arm segment
+                ctx.beginPath();
+                ctx.rect(-LIMB_THICKNESS / 2, 0, LIMB_THICKNESS, LIMB_LENGTH * 1.5);
+                ctx.fillStyle = '#cbd5e1'; // Slate-300
+                ctx.fill();
+                ctx.strokeStyle = '#475569';
+                ctx.stroke();
+                
+                // Hand/Claw (small circle at the end)
+                ctx.beginPath();
+                ctx.arc(0, LIMB_LENGTH * 1.5, LIMB_THICKNESS * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = '#fcd34d'; // Yellow-300
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+
+            if (!state.isFallen) {
+                drawArm(state.leftHandAngle, -1); // Left arm (shoulder is on the left side, -1)
+                drawArm(state.rightHandAngle, 1); // Right arm (shoulder is on the right side, 1)
+            }
+            
+            // --- Draw Carried Box (on top of robot) ---
+            if (state.hasBox && !state.isFallen) {
+                const carriedBoxSize = BODY_WIDTH * 0.7;
+                ctx.fillStyle = '#fef08a'; // Yellow-200
+                ctx.strokeStyle = '#b45309'; // Amber-800
+                ctx.lineWidth = 1.5;
+                
+                // Positioned above the robot's head
+                const boxTopY = robotCenterY - BODY_HEIGHT / 2 - HEAD_RADIUS * 1.5 - HEAD_RADIUS - carriedBoxSize / 2;
+                
+                ctx.fillRect(-carriedBoxSize / 2, boxTopY, carriedBoxSize, carriedBoxSize);
+                ctx.strokeRect(-carriedBoxSize / 2, boxTopY, carriedBoxSize, carriedBoxSize);
+            }
+            
+            ctx.restore(); // Restore context to the original map state
+
+            // --- Directional arrow (Drawn outside robot transform for clarity) ---
+            if (state.currentDirection !== 'STOP' && !state.isFallen) {
+                let angle = 0; 
+                if (state.currentDirection === 'UP') angle = -Math.PI / 2;
+                else if (state.currentDirection === 'DOWN') angle = Math.PI / 2;
+                else if (state.currentDirection === 'LEFT') angle = Math.PI;
+                else if (state.currentDirection === 'RIGHT') angle = 0;
+                
+                ctx.save();
+                ctx.translate(robotX, robotY + BODY_HEIGHT / 2 + LIMB_LENGTH / 2); // Start just above the head/body mass
+                ctx.rotate(angle);
+                
+                // Simple triangle arrow
+                ctx.beginPath();
+                ctx.moveTo(0, -15);
+                ctx.lineTo(-5, -25);
+                ctx.lineTo(5, -25);
+                ctx.closePath();
+                ctx.fillStyle = '#ef4444'; // Red for warning/movement
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+        
+        // --- Interval Setup ---
+        let telemetryInterval;
+        let summaryLogInterval;
+        let robotLogicInterval;
+        
+        function startTelemetryLoop() {
+            if (telemetryInterval) clearInterval(telemetryInterval);
+            telemetryInterval = setInterval(sendTelemetry, TELEMETRY_INTERVAL_MS);
+            addLog(`Telemetry stream started (${TELEMETRY_INTERVAL_MS}ms interval).`, 'control');
+        }
+
+        function startSummaryLogLoop() {
+            if (summaryLogInterval) clearInterval(summaryLogInterval);
+            if (state.persistenceLogging) {
+                summaryLogInterval = setInterval(sendSummaryLog, PERSISTENCE_INTERVAL_MS);
+                addLog(`Persistence summary log started (${PERSISTENCE_INTERVAL_MS}ms interval).`, 'control');
+            }
+        }
+
+        function startRobotLogicLoop() {
+             if (robotLogicInterval) clearInterval(robotLogicInterval);
+             robotLogicInterval = setInterval(robotLogic, ROBOT_LOGIC_INTERVAL_MS);
+             addLog(`Robot simulation logic started (${ROBOT_LOGIC_INTERVAL_MS}ms interval).`, 'control');
+        }
+
+
+        // --- Startup ---
+        window.onload = function() {
+            // 1. Start visualization and physics immediately (Offline capable)
+            initVelocityChart();
+            startRobotLogicLoop();
+            startTelemetryLoop(); // Start Telemetry for local visualization
+            startSummaryLogLoop(); // Start Logs for local visualization
+            updateDashboard();
+            window.addEventListener('resize', updateDashboard);
+            
+            // 2. Attempt to connect to Firebase
+            initFirebase();
+        };
+
+    </script>
+</body>
+</html>
